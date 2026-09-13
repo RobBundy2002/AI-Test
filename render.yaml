@@ -3,8 +3,16 @@ services:
     name: sermonwise
     runtime: docker
     plan: free
-    autoDeployTrigger: commit
+    autoDeployTrigger: checksPass
     healthCheckPath: /health
     envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sermonwise-db
+          property: connectionString
       - key: OPENAI_API_KEY
         sync: false
+databases:
+  - name: sermonwise-db
+    plan: 0.1c-256mb
+    databaseName: sermonwise
