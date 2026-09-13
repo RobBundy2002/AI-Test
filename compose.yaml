@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:17-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: sermonwise
+      POSTGRES_PASSWORD: sermonwise
+      POSTGRES_DB: sermonwise
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sermonwise"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - sermonwise-data:/var/lib/postgresql/data
+  web:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://sermonwise:sermonwise@db:5432/sermonwise
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+volumes:
+  sermonwise-data:

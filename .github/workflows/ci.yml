@@ -6,11 +6,38 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: sermonwise
+          POSTGRES_PASSWORD: sermonwise
+          POSTGRES_DB: sermonwise
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sermonwise"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://sermonwise:sermonwise@localhost:5432/sermonwise
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: npm
+      - run: npm ci
       - run: npm run check
       - run: npm test
       - run: docker build -t sermonwise:test .
+      - name: Smoke test deployment image
+        run: |
+          docker run -d --name sermonwise-smoke --network host -e DATABASE_URL="$DATABASE_URL" sermonwise:test
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://localhost:3000/health; then exit 0; fi
+            sleep 2
+          done
+          docker logs sermonwise-smoke
+          exit 1
