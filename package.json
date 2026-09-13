@@ -1,0 +1,12 @@
+{
+  "name": "sermonwise",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "check": "node --check server.js && node --check src/analyze.js && node --check src/youtube.js && node --check public/app.js"
+  },
+  "engines": { "node": ">=20" }
+}
