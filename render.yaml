@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: sermonwise
+    runtime: docker
+    plan: free
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
