@@ -320,6 +320,12 @@ $('#add-form').addEventListener('submit', async event => {
     openDetail(sermon.id);
   } catch (error) {
     $('#form-message').textContent = error.message;
+    if (/paste the transcript manually/i.test(error.message)) {
+      const details = form.querySelector('.transcript-details');
+      const transcript = form.elements.transcript;
+      if (details) details.open = true;
+      if (transcript) transcript.focus();
+    }
   } finally {
     button.disabled = false;
     button.textContent = 'Create study notes';
