@@ -3,38 +3,133 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f8f7f2">
-  <meta name="description" content="A thoughtful home for sermons and study notes.">
+  <meta name="theme-color" content="#15231b">
+  <meta name="description" content="Private sermon notes, transcripts, reflections, and study guides.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Libre+Baskerville:wght@400;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Libre+Baskerville:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
-  <title>SermonWise — Keep what stays with you</title>
+  <title>SermonWise - Sermon study library</title>
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <a class="brand" href="/" aria-label="SermonWise home"><span class="brand-mark">✦</span><span>SermonWise</span></a>
-      <div class="side-label">YOUR SPACE</div>
-      <button class="nav-item active" id="nav-library"><span>▦</span> Library</button>
-      <button class="nav-item" id="nav-favorites"><span>♡</span> Favorites</button>
-      <div class="sidebar-bottom"><span class="spark">✧</span><strong>Make room for reflection.</strong><p>Go deeper into the messages that matter to you.</p><button id="add-side" class="side-add">+ Add a sermon</button></div>
-    </aside>
-    <main class="main">
-      <header class="topbar"><div class="breadcrumb">MY LIBRARY <span>/</span> SERMONS</div><div class="top-actions"><span class="local-pill" id="account-email">Sign in to sync</span><button id="logout" class="logout-button" hidden>Sign out</button><button id="export" class="icon-button" title="Export library" aria-label="Export library">⇩</button><label class="icon-button import-label" title="Import library" aria-label="Import library">⇧<input id="import" type="file" accept="application/json" hidden></label></div></header>
-      <div class="content">
-        <section class="hero"><div class="eyebrow"><span class="eyebrow-line"></span> A PLACE TO RETURN TO</div><h1>Keep what <em>stays with you.</em></h1><p>Every sermon has something worth holding onto. Turn messages into meaningful notes, find the moments you need, and grow from what you've heard.</p><button id="add-hero" class="primary-button"><span>＋</span> Add a sermon</button><div class="hero-decoration" aria-hidden="true">✳</div></section>
-        <section class="library-section"><div class="section-heading"><div><div class="eyebrow muted">YOUR COLLECTION</div><h2 id="collection-title">Sermon library <span id="count">0</span></h2></div><div class="view-switch"><button class="selected" aria-label="Grid view">▦</button></div></div>
-          <div class="toolbar"><label class="search-box"><span>⌕</span><input id="search" placeholder="Search sermons, scripture, topics..." aria-label="Search sermons"></label><select id="speaker-filter" aria-label="Filter by speaker"><option value="">All speakers</option></select><select id="series-filter" aria-label="Filter by series"><option value="">All series</option></select></div>
-          <div id="sermon-list" class="sermon-grid"></div><div id="empty-state" class="empty-state"><div class="empty-icon">✦</div><h3>Your library starts here.</h3><p>Add a YouTube sermon to create notes, highlights, and a place to return to its message.</p><button id="add-empty" class="primary-button">＋ Add your first sermon</button></div>
-        </section>
+      <a class="brand" href="/" aria-label="SermonWise home"><span class="brand-mark">SW</span><span>SermonWise</span></a>
+      <nav class="side-nav" aria-label="Primary">
+        <button class="nav-item active" id="nav-library" type="button"><span>Library</span><strong id="nav-library-count">0</strong></button>
+        <button class="nav-item" id="nav-favorites" type="button"><span>Favorites</span><strong id="nav-favorite-count">0</strong></button>
+      </nav>
+      <div class="sidebar-panel">
+        <span class="panel-kicker">Server key</span>
+        <strong id="ai-status">Checking...</strong>
+        <p id="storage-status">Storage loading</p>
       </div>
+      <button id="add-side" class="side-add" type="button">Add sermon</button>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Private study workspace</p>
+          <h1>Sermon library</h1>
+        </div>
+        <div class="top-actions">
+          <span class="account-pill" id="account-email">Sign in to sync</span>
+          <button id="logout" class="ghost-button" type="button" hidden>Sign out</button>
+          <button id="export" class="icon-button" type="button" title="Export JSON" aria-label="Export JSON">Export</button>
+          <label class="icon-button import-label" title="Import JSON" aria-label="Import JSON">Import<input id="import" type="file" accept="application/json" hidden></label>
+          <button id="add-top" class="primary-button" type="button">Add sermon</button>
+        </div>
+      </header>
+
+      <section class="metrics" aria-label="Library metrics">
+        <article><span>Total</span><strong id="metric-total">0</strong></article>
+        <article><span>Favorites</span><strong id="metric-favorites">0</strong></article>
+        <article><span>AI notes</span><strong id="metric-ai">0</strong></article>
+        <article><span>Passages</span><strong id="metric-passages">0</strong></article>
+      </section>
+
+      <section class="workspace">
+        <div class="library-head">
+          <div>
+            <p class="eyebrow">Collection</p>
+            <h2 id="collection-title">All sermons <span id="count">0</span></h2>
+          </div>
+          <div class="view-switch" aria-label="View mode">
+            <button id="grid-view" class="selected" type="button" aria-label="Grid view">Grid</button>
+            <button id="list-view" type="button" aria-label="List view">List</button>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <label class="search-box"><span>Search</span><input id="search" placeholder="Title, scripture, speaker, topic..." aria-label="Search sermons"></label>
+          <select id="speaker-filter" aria-label="Filter by speaker"><option value="">All speakers</option></select>
+          <select id="series-filter" aria-label="Filter by series"><option value="">All series</option></select>
+          <select id="topic-filter" aria-label="Filter by topic"><option value="">All topics</option></select>
+          <select id="source-filter" aria-label="Filter by transcript source"><option value="">All sources</option><option value="captions">Captions</option><option value="audio">Audio</option><option value="pasted">Pasted</option></select>
+          <select id="sort-select" aria-label="Sort sermons"><option value="recent">Newest first</option><option value="oldest">Oldest first</option><option value="title">Title A-Z</option><option value="speaker">Speaker A-Z</option></select>
+          <button id="clear-filters" class="ghost-button" type="button">Clear</button>
+        </div>
+
+        <div id="sermon-list" class="sermon-grid"></div>
+        <div id="empty-state" class="empty-state">
+          <div class="empty-icon">SW</div>
+          <h3>Your library starts here.</h3>
+          <p>Add a YouTube sermon, paste a transcript if needed, and build a private archive of notes and reflections.</p>
+          <button id="add-empty" class="primary-button" type="button">Add your first sermon</button>
+        </div>
+      </section>
     </main>
   </div>
-  <dialog id="add-dialog" class="modal"><form id="add-form"><div class="modal-head"><div><div class="eyebrow muted">GROW YOUR LIBRARY</div><h2>Add a sermon</h2></div><button type="button" class="close-button" data-close aria-label="Close">×</button></div><p class="modal-intro">Paste a YouTube link. We'll find captions or transcribe the audio, then make study notes and highlights.</p><label class="field">YouTube link<input name="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required></label><div class="field-row"><label class="field">Speaker <span>(optional)</span><input name="speaker" placeholder="e.g. Pastor Sarah"></label><label class="field">Series <span>(optional)</span><input name="series" placeholder="e.g. The Good Life"></label></div><div class="field-row"><label class="field">Passage <span>(optional)</span><input name="passage" placeholder="e.g. Romans 8:28"></label><label class="field">Topics <span>(comma-separated)</span><input name="topics" placeholder="Faith, Prayer"></label></div><details class="transcript-details"><summary>Have a transcript? Paste it here <span>↗</span></summary><textarea name="transcript" rows="5" placeholder="Paste sermon transcript here if captions are unavailable..."></textarea></details><p id="form-message" class="form-message" role="alert"></p><button id="submit-button" class="primary-button full" type="submit">Create study notes <span>→</span></button><p class="fine-print">Captions are used when available. Captionless transcription and AI notes require a configured API key.</p></form></dialog>
-  <dialog id="auth-dialog" class="modal auth-modal"><form id="auth-form"><div class="eyebrow muted">YOUR SERMON LIBRARY, EVERYWHERE</div><h2 id="auth-title">Welcome back</h2><p class="modal-intro">Sign in to keep your study notes private and available across browsers.</p><label class="field">Email<input name="email" type="email" autocomplete="email" required></label><label class="field">Password<input name="password" type="password" autocomplete="current-password" minlength="12" required></label><p id="auth-message" class="form-message" role="alert"></p><button id="auth-submit" class="primary-button full" type="submit">Sign in</button><button id="auth-switch" class="auth-switch" type="button">New here? Create an account</button></form></dialog>
-  <dialog id="detail-dialog" class="detail-modal"><div id="detail-content"></div></dialog>
+
+  <dialog id="add-dialog" class="modal">
+    <form id="add-form">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">New study page</p>
+          <h2>Add a sermon</h2>
+        </div>
+        <button type="button" class="close-button" data-close aria-label="Close">&times;</button>
+      </div>
+      <p class="modal-intro">Paste a YouTube link. Captions are used first; server-side AI transcription runs only when an API key is configured.</p>
+      <label class="field">YouTube link<input name="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required></label>
+      <div class="field-row">
+        <label class="field">Speaker <span>(optional)</span><input name="speaker" placeholder="Pastor Sarah"></label>
+        <label class="field">Series <span>(optional)</span><input name="series" placeholder="The Good Life"></label>
+      </div>
+      <div class="field-row">
+        <label class="field">Passage <span>(optional)</span><input name="passage" placeholder="Romans 8:28"></label>
+        <label class="field">Topics <span>(comma-separated)</span><input name="topics" placeholder="Faith, Prayer, Hope"></label>
+      </div>
+      <details class="transcript-details">
+        <summary>Paste transcript manually</summary>
+        <textarea name="transcript" rows="7" placeholder="Paste the sermon transcript here when captions are unavailable..."></textarea>
+      </details>
+      <p id="form-message" class="form-message" role="alert"></p>
+      <button id="submit-button" class="primary-button full" type="submit">Create study notes</button>
+      <p class="fine-print">Do not put API keys in this form. Configure `OPENAI_API_KEY` on the server or in your local `.env` file.</p>
+    </form>
+  </dialog>
+
+  <dialog id="auth-dialog" class="modal auth-modal">
+    <form id="auth-form">
+      <p class="eyebrow">Your private library</p>
+      <h2 id="auth-title">Welcome back</h2>
+      <p class="modal-intro">Sign in or create a local account to keep notes private on this server.</p>
+      <label class="field">Email<input name="email" type="email" autocomplete="email" required></label>
+      <label class="field">Password<input name="password" type="password" autocomplete="current-password" minlength="12" required></label>
+      <label id="invite-field" class="field" hidden>Invite code<input id="invite-code" name="inviteCode" autocomplete="off"></label>
+      <p id="auth-message" class="form-message" role="alert"></p>
+      <button id="auth-submit" class="primary-button full" type="submit">Sign in</button>
+      <button id="auth-switch" class="auth-switch" type="button">New here? Create an account</button>
+    </form>
+  </dialog>
+
+  <dialog id="detail-dialog" class="detail-modal">
+    <div id="detail-content"></div>
+  </dialog>
+
   <script type="module" src="/app.js"></script>
 </body>
 </html>

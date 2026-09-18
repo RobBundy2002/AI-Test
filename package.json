@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "check": "node --check server.js && node --check src/analyze.js && node --check src/youtube.js && node --check src/auth.js && node --check src/store.js && node --check public/app.js"
+    "check": "node --check server.js && node --check src/analyze.js && node --check src/youtube.js && node --check src/auth.js && node --check src/store.js && node --check src/local-store.js && node --check public/app.js"
   },
   "engines": {
     "node": ">=20"

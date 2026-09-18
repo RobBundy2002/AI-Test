@@ -1,13 +1,16 @@
 import { createServer } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractiveNotes, normalizeTranscript, parseAiNotes, videoId } from './src/analyze.js';
 import { captions, metadata, transcribeAudio } from './src/youtube.js';
+import { createLocalStore } from './src/local-store.js';
 import { createPgStore } from './src/store.js';
 import { cookieToken, hashPassword, newId, newToken, normalizeEmail, sessionCookie, tokenHash, validEmail, validPassword, verifyPassword } from './src/auth.js';
 
-const root = join(fileURLToPath(new URL('.', import.meta.url)), 'public');
+const appDir = fileURLToPath(new URL('.', import.meta.url));
+const root = join(appDir, 'public');
 const types = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
 async function jsonBody(req) {
@@ -25,7 +28,7 @@ async function aiNotes(transcript, apiKey, fallback, fetcher = fetch) {
     const response = await fetcher('https://api.openai.com/v1/chat/completions', {
       method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'gpt-4o-mini', temperature: 0.2, response_format: { type: 'json_object' }, messages: [
-        { role: 'system', content: 'You create accurate sermon study notes. Return JSON with summary (2-4 concise sentences), takeaways (3-5 actionable insights), highlights (up to 4 short memorable paraphrases, not invented quotes), passages (only Bible references explicitly mentioned). Stay faithful to the transcript. Do not invent claims or scripture.' },
+        { role: 'system', content: 'You create accurate sermon study notes. Return JSON with summary (2-4 concise sentences), takeaways (3-5 actionable insights), highlights (up to 4 short memorable paraphrases, not invented quotes), passages (only Bible references explicitly mentioned), outline (3-5 objects with title and point), questions (3-5 reflection or discussion questions), keywords (5-10 short tags), and prayer (one short first-person prayer). Stay faithful to the transcript. Do not invent claims or scripture.' },
         { role: 'user', content: transcript.slice(0, 50000) }
       ] }), signal: AbortSignal.timeout(60000)
     });
@@ -35,9 +38,24 @@ async function aiNotes(transcript, apiKey, fallback, fetcher = fetch) {
   } catch { return { ...fallback, mode: 'extractive' }; }
 }
 
+function analyzeError(error) {
+  const message = String(error?.message || '');
+  if (/HTTP Error 403|SABR|PO Token|page needs to be reloaded|Video unavailable|unable to download video data/i.test(message)) {
+    return 'YouTube blocked automated transcript or audio access for this video. Try again, or paste the transcript manually.';
+  }
+  return message || 'Could not analyze this sermon.';
+}
+
+function secretEqual(value, expected) {
+  const left = Buffer.from(String(value || '').trim());
+  const right = Buffer.from(String(expected || '').trim());
+  return left.length === right.length && left.length > 0 && timingSafeEqual(left, right);
+}
+
 function cleanSermon(input) {
   if (!input || !videoId(input.url) || typeof input.title !== 'string' || !input.title.trim() || typeof input.transcript !== 'string' || !input.notes || typeof input.notes.summary !== 'string') return null;
   const video = videoId(input.url);
+  const noteArray = (name, limit, size) => Array.isArray(input.notes[name]) ? input.notes[name].slice(0, limit).map(x => String(x).slice(0, size)).filter(Boolean) : [];
   return {
     id: /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(input.id || '') ? input.id : newId(), url: `https://www.youtube.com/watch?v=${video}`, videoId: video,
     title: input.title.trim().slice(0, 200), speaker: String(input.speaker || '').slice(0, 100),
@@ -45,12 +63,40 @@ function cleanSermon(input) {
     topics: Array.isArray(input.topics) ? input.topics.slice(0, 10).map(x => String(x).slice(0, 60)) : [],
     thumbnail: `https://i.ytimg.com/vi/${video}/hqdefault.jpg`,
     transcript: input.transcript.slice(0, 100000), source: ['captions', 'audio', 'pasted'].includes(input.source) ? input.source : 'pasted',
-    notes: { summary: input.notes.summary.slice(0, 1400), takeaways: Array.isArray(input.notes.takeaways) ? input.notes.takeaways.slice(0, 6).map(x => String(x).slice(0, 350)) : [], highlights: Array.isArray(input.notes.highlights) ? input.notes.highlights.slice(0, 4).map(x => String(x).slice(0, 350)) : [], passages: Array.isArray(input.notes.passages) ? input.notes.passages.slice(0, 8).map(x => String(x).slice(0, 80)) : [], mode: input.notes.mode === 'ai' ? 'ai' : 'extractive' },
+    notes: {
+      summary: input.notes.summary.slice(0, 1400),
+      takeaways: noteArray('takeaways', 6, 350),
+      highlights: noteArray('highlights', 4, 350),
+      passages: noteArray('passages', 8, 80),
+      outline: Array.isArray(input.notes.outline) ? input.notes.outline.slice(0, 6).map((x, index) => typeof x === 'string' ? { title: `Point ${index + 1}`, point: x.slice(0, 260) } : { title: String(x?.title || `Point ${index + 1}`).slice(0, 80), point: String(x?.point || '').slice(0, 260) }).filter(x => x.point) : [],
+      questions: noteArray('questions', 6, 180),
+      keywords: noteArray('keywords', 10, 40),
+      prayer: String(input.notes.prayer || '').slice(0, 600),
+      mode: input.notes.mode === 'ai' ? 'ai' : 'extractive'
+    },
     favorite: Boolean(input.favorite), reflection: String(input.reflection || '').slice(0, 5000), createdAt: new Date().toISOString()
   };
 }
 
-export function createApp({ getMetadata = metadata, getCaptions = captions, getTranscription = transcribeAudio, makeNotes = aiNotes, apiKey = process.env.OPENAI_API_KEY || '', store = null, secureCookies = process.env.NODE_ENV === 'production' } = {}) {
+async function loadEnv() {
+  try {
+    const text = await readFile(join(appDir, '.env'), 'utf8');
+    for (const line of text.split(/\r?\n/)) {
+      const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i);
+      if (!match || process.env[match[1]] !== undefined) continue;
+      process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, '');
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
+async function createConfiguredStore() {
+  if (process.env.DATABASE_URL) return createPgStore();
+  return createLocalStore(process.env.LOCAL_STORE_PATH || join(appDir, '.data', 'sermonwise.json'));
+}
+
+export function createApp({ getMetadata = metadata, getCaptions = captions, getTranscription = transcribeAudio, makeNotes = aiNotes, apiKey = process.env.OPENAI_API_KEY || '', inviteCode = process.env.INVITE_CODE || '', store = null, secureCookies = process.env.NODE_ENV === 'production' } = {}) {
   const attempts = new Map();
   return createServer(async (req, res) => {
     const send = (status, data, headers = {}) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers }); res.end(JSON.stringify(data)); };
@@ -61,6 +107,7 @@ export function createApp({ getMetadata = metadata, getCaptions = captions, getT
     }
     const user = async () => { const token = cookieToken(req.headers.cookie); const record = token && store ? await store.getUserBySession(tokenHash(token)) : null; return record ? { id: record.id, email: record.email } : null; };
     if (req.url === '/api/me' && req.method === 'GET') return send(200, { user: await user() });
+    if (req.url === '/api/status' && req.method === 'GET') return send(200, { aiConfigured: Boolean(apiKey), inviteRequired: Boolean(inviteCode), storage: store?.kind || 'custom' });
     if (['/api/register', '/api/login'].includes(req.url) && req.method === 'POST') {
       if (!store) return send(503, { error: 'Account storage is not configured.' });
       const ip = req.socket.remoteAddress || 'unknown';
@@ -73,6 +120,7 @@ export function createApp({ getMetadata = metadata, getCaptions = captions, getT
         if (!validEmail(email) || typeof body.password !== 'string') return send(400, { error: 'Enter a valid email and password.' });
         let account;
         if (req.url === '/api/register') {
+          if (inviteCode && !secretEqual(body.inviteCode, inviteCode)) return send(403, { error: 'Enter a valid invite code to create an account.' });
           if (!validPassword(body.password)) return send(400, { error: 'Use a password of at least 12 characters.' });
           account = await store.createUser(newId(), email, await hashPassword(body.password));
           if (!account) return send(409, { error: 'An account with this email already exists.' });
@@ -126,7 +174,7 @@ export function createApp({ getMetadata = metadata, getCaptions = captions, getT
         if (!transcript) return send(422, { error: 'No captions were available. Add an OpenAI API key for audio transcription, or paste a transcript.', details });
         const notes = await makeNotes(transcript, apiKey, extractiveNotes(transcript));
         return send(200, { videoId: id, ...details, transcript, source, notes });
-      } catch (error) { return send(422, { error: error.message || 'Could not analyze this sermon.' }); }
+      } catch (error) { return send(422, { error: analyzeError(error) }); }
     }
     if (req.method !== 'GET') return send(405, { error: 'Method not allowed.' });
     try {
@@ -142,6 +190,7 @@ export function createApp({ getMetadata = metadata, getCaptions = captions, getT
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const store = await createPgStore();
+  await loadEnv();
+  const store = await createConfiguredStore();
   createApp({ store }).listen(Number(process.env.PORT || 3000), '0.0.0.0', () => console.log(`SermonWise listening on ${process.env.PORT || 3000}`));
 }
