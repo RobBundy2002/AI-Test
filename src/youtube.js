@@ -78,7 +78,7 @@ export async function captions(id) {
         lastError = error;
       }
     }
-    if (lastError) throw new Error('Could not fetch captions from YouTube. Try pasting the transcript manually.');
+    if (lastError) throw new Error('YouTube blocked caption download for this video. Paste the transcript manually to create notes for it.');
     return '';
   } finally { await rm(dir, { recursive: true, force: true }); }
 }

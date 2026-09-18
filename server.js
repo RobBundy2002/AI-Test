@@ -40,8 +40,8 @@ async function aiNotes(transcript, apiKey, fallback, fetcher = fetch) {
 
 function analyzeError(error) {
   const message = String(error?.message || '');
-  if (/HTTP Error 403|SABR|PO Token|page needs to be reloaded|Video unavailable|unable to download video data/i.test(message)) {
-    return 'YouTube blocked automated transcript or audio access for this video. Try again, or paste the transcript manually.';
+  if (/HTTP Error 403|HTTP Error 429|Too Many Requests|SABR|PO Token|GVS PO Token|page needs to be reloaded|Video unavailable|unable to download video data|Unable to download video subtitles|Failed to extract any player response|Confirm you are on the latest version|please report this issue|No video formats found/i.test(message)) {
+    return 'YouTube blocked automated transcript or audio access for this video from the server. Paste the transcript manually to create notes for it.';
   }
   return message || 'Could not analyze this sermon.';
 }
