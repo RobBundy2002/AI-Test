@@ -12,7 +12,7 @@ async function withApp(options, fn) {
 test('health and homepage are served', async () => {
   await withApp({ apiKey: 'secret-test-key' }, async base => {
     assert.deepEqual(await (await fetch(`${base}/health`)).json(), { ok: true });
-    assert.deepEqual(await (await fetch(`${base}/api/status`)).json(), { aiConfigured: true, storage: 'custom' });
+    assert.deepEqual(await (await fetch(`${base}/api/status`)).json(), { aiConfigured: true, inviteRequired: false, storage: 'custom' });
     assert.match(await (await fetch(base)).text(), /SermonWise/);
   });
 });

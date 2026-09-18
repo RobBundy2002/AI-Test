@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +46,12 @@ function analyzeError(error) {
   return message || 'Could not analyze this sermon.';
 }
 
+function secretEqual(value, expected) {
+  const left = Buffer.from(String(value || '').trim());
+  const right = Buffer.from(String(expected || '').trim());
+  return left.length === right.length && left.length > 0 && timingSafeEqual(left, right);
+}
+
 function cleanSermon(input) {
   if (!input || !videoId(input.url) || typeof input.title !== 'string' || !input.title.trim() || typeof input.transcript !== 'string' || !input.notes || typeof input.notes.summary !== 'string') return null;
   const video = videoId(input.url);
@@ -89,7 +96,7 @@ async function createConfiguredStore() {
   return createLocalStore(process.env.LOCAL_STORE_PATH || join(appDir, '.data', 'sermonwise.json'));
 }
 
-export function createApp({ getMetadata = metadata, getCaptions = captions, getTranscription = transcribeAudio, makeNotes = aiNotes, apiKey = process.env.OPENAI_API_KEY || '', store = null, secureCookies = process.env.NODE_ENV === 'production' } = {}) {
+export function createApp({ getMetadata = metadata, getCaptions = captions, getTranscription = transcribeAudio, makeNotes = aiNotes, apiKey = process.env.OPENAI_API_KEY || '', inviteCode = process.env.INVITE_CODE || '', store = null, secureCookies = process.env.NODE_ENV === 'production' } = {}) {
   const attempts = new Map();
   return createServer(async (req, res) => {
     const send = (status, data, headers = {}) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers }); res.end(JSON.stringify(data)); };
@@ -100,7 +107,7 @@ export function createApp({ getMetadata = metadata, getCaptions = captions, getT
     }
     const user = async () => { const token = cookieToken(req.headers.cookie); const record = token && store ? await store.getUserBySession(tokenHash(token)) : null; return record ? { id: record.id, email: record.email } : null; };
     if (req.url === '/api/me' && req.method === 'GET') return send(200, { user: await user() });
-    if (req.url === '/api/status' && req.method === 'GET') return send(200, { aiConfigured: Boolean(apiKey), storage: store?.kind || 'custom' });
+    if (req.url === '/api/status' && req.method === 'GET') return send(200, { aiConfigured: Boolean(apiKey), inviteRequired: Boolean(inviteCode), storage: store?.kind || 'custom' });
     if (['/api/register', '/api/login'].includes(req.url) && req.method === 'POST') {
       if (!store) return send(503, { error: 'Account storage is not configured.' });
       const ip = req.socket.remoteAddress || 'unknown';
@@ -113,6 +120,7 @@ export function createApp({ getMetadata = metadata, getCaptions = captions, getT
         if (!validEmail(email) || typeof body.password !== 'string') return send(400, { error: 'Enter a valid email and password.' });
         let account;
         if (req.url === '/api/register') {
+          if (inviteCode && !secretEqual(body.inviteCode, inviteCode)) return send(403, { error: 'Enter a valid invite code to create an account.' });
           if (!validPassword(body.password)) return send(400, { error: 'Use a password of at least 12 characters.' });
           account = await store.createUser(newId(), email, await hashPassword(body.password));
           if (!account) return send(409, { error: 'An account with this email already exists.' });

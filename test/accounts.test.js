@@ -19,8 +19,8 @@ function fakeStore() {
   };
 }
 
-async function withApp(fn) {
-  const app = createApp({ store: fakeStore(), secureCookies: false });
+async function withApp(fn, options = {}) {
+  const app = createApp({ store: fakeStore(), secureCookies: false, ...options });
   await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
   try { await fn(`http://127.0.0.1:${app.address().port}`); }
   finally { await new Promise(resolve => app.close(resolve)); }
@@ -56,4 +56,17 @@ test('invalid auth and cross-origin mutations are rejected', async () => {
     const cross = await fetch(base + '/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, body: JSON.stringify({ email: 'good@example.com', password: 'a-long-password' }) });
     assert.equal(cross.status, 403);
   });
+});
+
+test('invite code is required only for registration when configured', async () => {
+  await withApp(async base => {
+    const call = async (path, method = 'GET', body, cookie = '') => fetch(base + path, { method, headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: body && JSON.stringify(body) });
+    assert.deepEqual(await (await call('/api/status')).json(), { aiConfigured: false, inviteRequired: true, storage: 'custom' });
+    assert.equal((await call('/api/register', 'POST', { email: 'invite@example.com', password: 'a-long-password-123' })).status, 403);
+    assert.equal((await call('/api/register', 'POST', { email: 'invite@example.com', password: 'a-long-password-123', inviteCode: 'wrong' })).status, 403);
+    const created = await call('/api/register', 'POST', { email: 'invite@example.com', password: 'a-long-password-123', inviteCode: 'test-invite' });
+    assert.equal(created.status, 200);
+    const login = await call('/api/login', 'POST', { email: 'invite@example.com', password: 'a-long-password-123' });
+    assert.equal(login.status, 200);
+  }, { inviteCode: 'test-invite' });
 });

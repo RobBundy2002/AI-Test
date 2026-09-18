@@ -12,6 +12,8 @@ services:
           property: connectionString
       - key: OPENAI_API_KEY
         sync: false
+      - key: INVITE_CODE
+        sync: false
 databases:
   - name: sermonwise-db
     plan: free

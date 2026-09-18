@@ -8,6 +8,7 @@ let favoritesOnly = false;
 let currentUser = null;
 let authMode = 'login';
 let viewMode = localStorage.getItem('sermonwise.view') || 'grid';
+let inviteRequired = false;
 
 async function api(path, options = {}) {
   const response = await fetch(path, { ...options, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
@@ -259,6 +260,9 @@ function showAuth(mode = 'login') {
   $('#auth-submit').textContent = mode === 'login' ? 'Sign in' : 'Create account';
   $('#auth-switch').textContent = mode === 'login' ? 'New here? Create an account' : 'Already have an account? Sign in';
   $('#auth-form').elements.password.autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+  $('#invite-field').hidden = mode !== 'register' || !inviteRequired;
+  $('#invite-code').required = mode === 'register' && inviteRequired;
+  if (mode === 'login') $('#invite-code').value = '';
   $('#auth-message').textContent = '';
   if (!$('#auth-dialog').open) $('#auth-dialog').showModal();
 }
@@ -433,6 +437,7 @@ $('#logout').addEventListener('click', async () => {
 async function init() {
   try {
     const status = await api('/api/status');
+    inviteRequired = Boolean(status.inviteRequired);
     $('#ai-status').textContent = status.aiConfigured ? 'AI ready' : 'Extractive mode';
     $('#storage-status').textContent = `${status.storage === 'postgres' ? 'Postgres' : 'Local'} storage active`;
   } catch {

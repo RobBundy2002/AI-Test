@@ -21,11 +21,13 @@ Create a local `.env` file when you want AI-written notes or transcription:
 
 ```bash
 OPENAI_API_KEY=sk-...
+INVITE_CODE=choose-a-private-code
 PORT=3000
 LOCAL_STORE_PATH=.data/sermonwise.json
 ```
 
 With no key, captioned videos still produce extractive notes and you can paste a transcript manually. Caption and audio extraction requires `yt-dlp` on the server. Captionless transcription also requires `OPENAI_API_KEY`.
+Set `INVITE_CODE` to require that code when creating new accounts. Existing users can still sign in without it.
 
 For local macOS development without Homebrew, install `yt-dlp` into Python:
 
@@ -56,4 +58,4 @@ npm test
 
 ## Deploy
 
-Connect this repository to Render with the included `render.yaml` Blueprint. Add `OPENAI_API_KEY` as a secret environment variable in Render. Keep `DATABASE_URL` managed by Render or another server-side database provider; never expose it to the browser.
+Connect this repository to Render with the included `render.yaml` Blueprint. Add `OPENAI_API_KEY` and `INVITE_CODE` as secret environment variables in Render. Keep `DATABASE_URL` managed by Render or another server-side database provider; never expose it to the browser.
