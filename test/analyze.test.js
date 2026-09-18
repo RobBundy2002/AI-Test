@@ -15,6 +15,9 @@ test('creates bounded notes and extracts explicit Bible passages', () => {
   const notes = extractiveNotes(transcript);
   assert.ok(notes.summary.includes('hope'));
   assert.ok(notes.takeaways.length >= 2);
+  assert.ok(notes.outline.length >= 2);
+  assert.ok(notes.questions.length >= 3);
+  assert.ok(notes.keywords.includes('hope'));
   assert.deepEqual(notes.passages, ['Romans 8:28']);
   assert.equal(normalizeTranscript([{ text: 'Hello  world' }, { text: 'Again' }]), 'Hello world Again');
 });
@@ -22,5 +25,8 @@ test('creates bounded notes and extracts explicit Bible passages', () => {
 test('falls back when AI output is invalid', () => {
   const fallback = extractiveNotes('We can practice patient kindness with our neighbors.');
   assert.deepEqual(parseAiNotes('not json', fallback), fallback);
-  assert.equal(parseAiNotes('{"summary":"Good","takeaways":[],"highlights":[],"passages":[]}', fallback).summary, 'Good');
+  const parsed = parseAiNotes('{"summary":"Good","takeaways":[],"highlights":[],"passages":[],"outline":[{"title":"Point","point":"Practice kindness."}],"questions":["How will I respond?"],"keywords":["kindness"],"prayer":"Help me respond."}', fallback);
+  assert.equal(parsed.summary, 'Good');
+  assert.deepEqual(parsed.outline, [{ title: 'Point', point: 'Practice kindness.' }]);
+  assert.deepEqual(parsed.keywords, ['kindness']);
 });

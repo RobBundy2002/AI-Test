@@ -1,15 +1,59 @@
 # SermonWise
 
-Turn a YouTube sermon into a searchable study page with a summary, key takeaways, highlighted moments, a transcript, and private reflections. Organize your library by passage, topic, speaker, and series. Email/password accounts keep each person's library private and available across browsers.
+SermonWise turns a YouTube sermon into a private study page with a transcript, summary, takeaways, outline, discussion questions, keywords, prayer prompt, and personal reflections. The library can be searched, filtered, favorited, imported, exported, and downloaded as Markdown.
 
 ## Run locally
 
-Requires Node.js 20+ and PostgreSQL. The simplest local setup is `docker compose up --build`, then open `http://localhost:3000`. The database uses a named volume and persists across container restarts. For a host install, set `DATABASE_URL`, run `npm ci && npm start`, and open the same URL. Run `npm test` for automated tests; set `DATABASE_URL` to include the PostgreSQL integration test.
+Requires Node.js 20+.
 
-Add `OPENAI_API_KEY` to your environment to enable AI-written notes and transcription when captions are unavailable. Without a key, videos with captions still produce extractive notes; you can also paste a transcript. Captionless videos require the key plus `yt-dlp` and `ffmpeg` on the server (included in the Docker image). Audio is limited to 24 MB and five minutes of download time. Some YouTube videos restrict extraction; paste a transcript in that case. Only process videos you have permission to use.
+```bash
+npm ci
+npm start
+```
+
+Open `http://localhost:3000`, create an account, and start adding sermons. Without any database config, SermonWise stores local data in `.data/sermonwise.json`, which is ignored by git.
+
+## API keys
+
+Do not put API keys in `public/`, frontend JavaScript, HTML, or browser storage. The browser only calls `/api/analyze`; the server reads `OPENAI_API_KEY` from the environment.
+
+Create a local `.env` file when you want AI-written notes or transcription:
+
+```bash
+OPENAI_API_KEY=sk-...
+PORT=3000
+LOCAL_STORE_PATH=.data/sermonwise.json
+```
+
+With no key, captioned videos still produce extractive notes and you can paste a transcript manually. Caption and audio extraction requires `yt-dlp` on the server. Captionless transcription also requires `OPENAI_API_KEY`.
+
+For local macOS development without Homebrew, install `yt-dlp` into Python:
+
+```bash
+python3 -m pip install --user yt-dlp
+```
+
+If the installed command is not on your `PATH`, the app also tries `python3 -m yt_dlp`. You can set `YT_DLP_PATH=/absolute/path/to/yt-dlp` in `.env` for a custom install.
+
+## Optional Postgres
+
+Set `DATABASE_URL` to use PostgreSQL instead of the local JSON store:
+
+```bash
+DATABASE_URL=postgresql://sermonwise:sermonwise@localhost:5432/sermonwise
+```
+
+The included `compose.yaml` and Dockerfile still support a containerized setup with Postgres. Run `docker compose up --build`, then open `http://localhost:3000`.
+
+## Test
+
+```bash
+npm run check
+npm test
+```
+
+`npm test` runs without Postgres by default. Set `DATABASE_URL` to include the PostgreSQL integration test.
 
 ## Deploy
 
-CI runs checks, tests against PostgreSQL, and a Docker build on every pull request and push to `main`. Connect this repository to [Render](https://render.com/) using the included `render.yaml` Blueprint. It provisions a managed PostgreSQL database and a web service; the database is configured on Render's smallest **paid** compute plan for durable storage. Review Render's price before creating the Blueprint. Render deploys commits to `main` only after CI passes. Add `OPENAI_API_KEY` as a secret environment variable in Render for captionless transcription and AI notes. The `/health` endpoint checks both the app and database.
-
-Existing browser-only libraries are offered for import after sign-in. JSON export remains available for personal backup. Passwords are salted and hashed; sessions use HTTP-only, SameSite cookies. This release does not yet include password reset or email verification, so use a password manager and keep your library export.
+Connect this repository to Render with the included `render.yaml` Blueprint. Add `OPENAI_API_KEY` as a secret environment variable in Render. Keep `DATABASE_URL` managed by Render or another server-side database provider; never expose it to the browser.

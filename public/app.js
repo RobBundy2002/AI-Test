@@ -1,100 +1,258 @@
 const KEY = 'sermonwise.library.v1';
 const $ = selector => document.querySelector(selector);
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const load = () => { try { const x = JSON.parse(localStorage.getItem(KEY)); return Array.isArray(x) ? x : []; } catch { return []; } };
+const loadOldLibrary = () => { try { const value = JSON.parse(localStorage.getItem(KEY)); return Array.isArray(value) ? value : []; } catch { return []; } };
+
 let sermons = [];
 let favoritesOnly = false;
 let currentUser = null;
 let authMode = 'login';
+let viewMode = localStorage.getItem('sermonwise.view') || 'grid';
+
 async function api(path, options = {}) {
   const response = await fetch(path, { ...options, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Request failed.');
   return data;
 }
-async function refreshLibrary() { sermons = (await api('/api/sermons')).sermons; render(); }
-const dateLabel = value => new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
-function render() {
+const dateLabel = value => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Unknown date' : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
+const uniqueSorted = values => [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+
+function setOptions(selector, values, label, selected) {
+  const el = $(selector);
+  el.innerHTML = `<option value="">${label}</option>` + values.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('');
+  el.value = values.includes(selected) ? selected : '';
+}
+
+function stats() {
+  const passages = new Set(sermons.flatMap(item => [item.passage, ...(item.notes?.passages || [])].filter(Boolean)));
+  return {
+    total: sermons.length,
+    favorites: sermons.filter(item => item.favorite).length,
+    ai: sermons.filter(item => item.notes?.mode === 'ai').length,
+    passages: passages.size
+  };
+}
+
+function filteredSermons() {
   const query = $('#search').value.trim().toLowerCase();
   const speaker = $('#speaker-filter').value;
   const series = $('#series-filter').value;
-  const speakers = [...new Set(sermons.map(x => x.speaker).filter(Boolean))].sort();
-  const seriesNames = [...new Set(sermons.map(x => x.series).filter(Boolean))].sort();
-  $('#speaker-filter').innerHTML = '<option value="">All speakers</option>' + speakers.map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
-  $('#series-filter').innerHTML = '<option value="">All series</option>' + seriesNames.map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
-  $('#speaker-filter').value = speaker;
-  $('#series-filter').value = series;
-  const filtered = sermons.filter(x => (!favoritesOnly || x.favorite) && (!speaker || x.speaker === speaker) && (!series || x.series === series) && (!query || [x.title, x.speaker, x.series, x.passage, ...(x.topics || []), x.notes?.summary, x.transcript].join(' ').toLowerCase().includes(query)));
-  $('#collection-title').firstChild.textContent = favoritesOnly ? 'Favorites ' : 'Sermon library ';
-  $('#count').textContent = filtered.length;
-  $('#empty-state').hidden = sermons.length > 0 || favoritesOnly || !!query || !!speaker || !!series;
-  $('#sermon-list').innerHTML = filtered.map(x => `<article class="sermon-card" data-id="${escapeHtml(x.id)}"><button class="card-image" data-open="${escapeHtml(x.id)}" aria-label="Open ${escapeHtml(x.title)}"><img src="${escapeHtml(x.thumbnail)}" alt="" loading="lazy"><span class="play-icon">▶</span></button><div class="card-body"><div class="card-meta"><span>${escapeHtml(x.series || 'SERMON')}</span><button class="favorite ${x.favorite ? 'is-favorite' : ''}" data-favorite="${escapeHtml(x.id)}" aria-label="${x.favorite ? 'Remove from favorites' : 'Add to favorites'}">${x.favorite ? '♥' : '♡'}</button></div><button class="card-title" data-open="${escapeHtml(x.id)}">${escapeHtml(x.title)}</button><p class="card-summary">${escapeHtml(x.notes?.summary || '').slice(0, 135)}${(x.notes?.summary || '').length > 135 ? '…' : ''}</p><div class="card-tags">${x.passage ? `<span>${escapeHtml(x.passage)}</span>` : ''}${(x.topics || []).slice(0, 2).map(t => `<span>${escapeHtml(t)}</span>`).join('')}</div><div class="card-footer"><span>${escapeHtml(x.speaker || 'Unknown speaker')}</span><span>${dateLabel(x.createdAt)}</span></div></div></article>`).join('');
-  if (!filtered.length && sermons.length && !$('#empty-state').hidden) $('#empty-state').hidden = true;
-  if (!filtered.length && sermons.length) $('#sermon-list').innerHTML = '<div class="no-results">No sermons match your search.</div>';
+  const topic = $('#topic-filter').value;
+  const source = $('#source-filter').value;
+  const sort = $('#sort-select').value;
+  const filtered = sermons.filter(item => {
+    const haystack = [item.title, item.speaker, item.series, item.passage, item.source, ...(item.topics || []), ...(item.notes?.keywords || []), item.notes?.summary, item.transcript].join(' ').toLowerCase();
+    return (!favoritesOnly || item.favorite)
+      && (!speaker || item.speaker === speaker)
+      && (!series || item.series === series)
+      && (!topic || (item.topics || []).includes(topic) || (item.notes?.keywords || []).includes(topic))
+      && (!source || item.source === source)
+      && (!query || haystack.includes(query));
+  });
+  return filtered.sort((a, b) => {
+    if (sort === 'oldest') return new Date(a.createdAt) - new Date(b.createdAt);
+    if (sort === 'title') return String(a.title).localeCompare(String(b.title));
+    if (sort === 'speaker') return String(a.speaker || '').localeCompare(String(b.speaker || '')) || String(a.title).localeCompare(String(b.title));
+    return new Date(b.createdAt) - new Date(a.createdAt);
+  });
 }
 
-function openAdd() { if (!currentUser) { $('#auth-dialog').showModal(); return; } $('#form-message').textContent = ''; $('#add-dialog').showModal(); }
-['#add-hero', '#add-side', '#add-empty'].forEach(s => $(s).addEventListener('click', openAdd));
-document.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', () => el.closest('dialog').close()));
-document.querySelectorAll('dialog').forEach(el => el.addEventListener('click', event => { if (event.target === el) el.close(); }));
-['#search', '#speaker-filter', '#series-filter'].forEach(s => $(s).addEventListener(s === '#search' ? 'input' : 'change', render));
-$('#nav-library').addEventListener('click', () => { favoritesOnly = false; $('#nav-library').classList.add('active'); $('#nav-favorites').classList.remove('active'); render(); });
-$('#nav-favorites').addEventListener('click', () => { favoritesOnly = true; $('#nav-favorites').classList.add('active'); $('#nav-library').classList.remove('active'); render(); });
+function updateMetrics() {
+  const values = stats();
+  $('#metric-total').textContent = values.total;
+  $('#metric-favorites').textContent = values.favorites;
+  $('#metric-ai').textContent = values.ai;
+  $('#metric-passages').textContent = values.passages;
+  $('#nav-library-count').textContent = values.total;
+  $('#nav-favorite-count').textContent = values.favorites;
+}
 
-$('#add-form').addEventListener('submit', async event => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = Object.fromEntries(new FormData(form));
-  const button = $('#submit-button');
-  button.disabled = true;
-  button.textContent = 'Creating your study notes…';
-  $('#form-message').textContent = 'This may take a few minutes if audio transcription is needed.';
+function render() {
+  const selected = {
+    speaker: $('#speaker-filter').value,
+    series: $('#series-filter').value,
+    topic: $('#topic-filter').value
+  };
+  setOptions('#speaker-filter', uniqueSorted(sermons.map(item => item.speaker)), 'All speakers', selected.speaker);
+  setOptions('#series-filter', uniqueSorted(sermons.map(item => item.series)), 'All series', selected.series);
+  setOptions('#topic-filter', uniqueSorted(sermons.flatMap(item => [...(item.topics || []), ...(item.notes?.keywords || [])])), 'All topics', selected.topic);
+  updateMetrics();
+
+  const filtered = filteredSermons();
+  $('#collection-title').firstChild.textContent = favoritesOnly ? 'Favorites ' : 'All sermons ';
+  $('#count').textContent = filtered.length;
+  $('#sermon-list').className = viewMode === 'list' ? 'sermon-list list-mode' : 'sermon-grid';
+  $('#grid-view').classList.toggle('selected', viewMode === 'grid');
+  $('#list-view').classList.toggle('selected', viewMode === 'list');
+  $('#empty-state').hidden = sermons.length > 0 || favoritesOnly || hasFilters();
+
+  if (!filtered.length && sermons.length) {
+    $('#sermon-list').innerHTML = '<div class="no-results">No sermons match the current filters.</div>';
+    return;
+  }
+  $('#sermon-list').innerHTML = filtered.map(cardTemplate).join('');
+}
+
+function hasFilters() {
+  return Boolean($('#search').value.trim() || $('#speaker-filter').value || $('#series-filter').value || $('#topic-filter').value || $('#source-filter').value);
+}
+
+function cardTemplate(item) {
+  const topics = [...(item.topics || []), ...(item.notes?.keywords || [])].filter(Boolean);
+  const badges = [item.passage, ...topics].filter(Boolean).slice(0, 4).map(tag => `<span>${escapeHtml(tag)}</span>`).join('');
+  const metaLabel = item.series || (item.notes?.mode === 'ai' ? 'AI notes' : 'Study notes');
+  return `<article class="sermon-card ${item.favorite ? 'is-saved' : ''}" data-id="${escapeHtml(item.id)}">
+    <button class="card-image" data-open="${escapeHtml(item.id)}" aria-label="Open ${escapeHtml(item.title)}">
+      <img src="${escapeHtml(item.thumbnail)}" alt="" loading="lazy">
+      <span class="source-chip">${escapeHtml(item.source || 'pasted')}</span>
+    </button>
+    <div class="card-body">
+      <div class="card-meta">
+        <span>${escapeHtml(metaLabel)}</span>
+        <button class="favorite ${item.favorite ? 'is-favorite' : ''}" data-favorite="${escapeHtml(item.id)}" aria-label="${item.favorite ? 'Remove from favorites' : 'Add to favorites'}">${item.favorite ? 'Saved' : 'Save'}</button>
+      </div>
+      <button class="card-title" data-open="${escapeHtml(item.id)}">${escapeHtml(item.title)}</button>
+      <p class="card-summary">${escapeHtml(item.notes?.summary || '').slice(0, 170)}${(item.notes?.summary || '').length > 170 ? '...' : ''}</p>
+      <div class="card-tags">${badges}</div>
+      <div class="card-footer"><span>${escapeHtml(item.speaker || 'Unknown speaker')}</span><span>${dateLabel(item.createdAt)}</span></div>
+    </div>
+  </article>`;
+}
+
+function openAdd() {
+  if (!currentUser) {
+    showAuth();
+    return;
+  }
+  $('#form-message').textContent = '';
+  $('#add-dialog').showModal();
+}
+
+async function refreshLibrary() {
+  sermons = (await api('/api/sermons')).sermons;
+  render();
+}
+
+function markdownFor(item) {
+  const lines = [
+    `# ${item.title}`,
+    '',
+    `- Speaker: ${item.speaker || 'Unknown speaker'}`,
+    `- Series: ${item.series || 'None'}`,
+    `- Date saved: ${dateLabel(item.createdAt)}`,
+    `- Source: ${item.url}`,
+    '',
+    '## Summary',
+    item.notes?.summary || '',
+    '',
+    '## Key Takeaways',
+    ...(item.notes?.takeaways || []).map(text => `- ${text}`),
+    '',
+    '## Outline',
+    ...(item.notes?.outline || []).map(point => `- ${point.title}: ${point.point}`),
+    '',
+    '## Discussion Questions',
+    ...(item.notes?.questions || []).map(text => `- ${text}`),
+    '',
+    '## Prayer',
+    item.notes?.prayer || '',
+    '',
+    '## Personal Reflection',
+    item.reflection || '',
+    '',
+    '## Transcript',
+    item.transcript || ''
+  ];
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+async function copyText(text) {
   try {
-    const response = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: data.url, transcript: data.transcript }) });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Could not create notes.');
-    const draft = { url: `https://www.youtube.com/watch?v=${result.videoId}`, videoId: result.videoId, title: result.title, speaker: data.speaker.trim() || result.speaker, series: data.series.trim(), passage: data.passage.trim() || result.notes.passages?.[0] || '', topics: data.topics.split(',').map(x => x.trim()).filter(Boolean), transcript: result.transcript, source: result.source, notes: result.notes };
-    const sermon = (await api('/api/sermons', { method: 'POST', body: JSON.stringify(draft) })).sermon;
-    sermons.unshift(sermon); render(); form.reset(); $('#add-dialog').close(); openDetail(sermon.id);
-  } catch (error) { $('#form-message').textContent = error.message; }
-  finally { button.disabled = false; button.innerHTML = 'Create study notes <span>→</span>'; }
-});
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    textarea.remove();
+  }
+}
+
+function downloadText(name, text, type = 'text/markdown') {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function safeFileName(value) {
+  return String(value || 'sermon').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 70) || 'sermon';
+}
 
 function openDetail(sermonId) {
-  const x = sermons.find(item => item.id === sermonId);
-  if (!x) return;
-  $('#detail-content').innerHTML = `<div class="detail-top"><button class="back-button" data-detail-close>← Back to library</button><button class="favorite ${x.favorite ? 'is-favorite' : ''}" data-favorite="${escapeHtml(x.id)}" aria-label="Toggle favorite">${x.favorite ? '♥' : '♡'}</button></div><div class="detail-hero"><div class="eyebrow muted">${escapeHtml(x.series || 'SERMON NOTES')}</div><h2>${escapeHtml(x.title)}</h2><p>${escapeHtml(x.speaker || 'Unknown speaker')} <span>·</span> ${dateLabel(x.createdAt)}</p><div class="detail-tags">${x.passage ? `<span>${escapeHtml(x.passage)}</span>` : ''}${(x.topics || []).map(t => `<span>${escapeHtml(t)}</span>`).join('')}</div></div><div class="video-wrap"><iframe src="https://www.youtube-nocookie.com/embed/${escapeHtml(x.videoId)}" title="${escapeHtml(x.title)}" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div><div class="detail-note"><span class="note-icon">✦</span><div><small>THE MESSAGE IN A MOMENT</small><p>${escapeHtml(x.notes?.summary || '')}</p></div></div><div class="detail-columns"><section><h3>Key takeaways</h3><ol class="takeaways">${(x.notes?.takeaways || []).map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ol></section><section><h3>Moments to remember</h3><div class="highlights">${(x.notes?.highlights || []).map(t => `<blockquote>“${escapeHtml(t)}”</blockquote>`).join('')}</div></section></div><section class="reflection-panel"><h3>My reflections</h3><p>What stood out, and how will you put it into practice?</p><textarea id="reflection" maxlength="5000" rows="5" placeholder="Write your own thoughts here...">${escapeHtml(x.reflection || '')}</textarea><button class="side-add" data-save-reflection="${escapeHtml(x.id)}">Save reflection</button><span id="reflection-status" role="status"></span></section><details class="transcript-panel"><summary>Read full transcript <span>⌄</span></summary><p>${escapeHtml(x.transcript)}</p></details><div class="detail-bottom"><small>Notes: ${x.notes?.mode === 'ai' ? 'AI-assisted' : 'Extractive'} · Transcript: ${escapeHtml(x.source)}. Verify against the original sermon.</small><button class="delete-button" data-delete="${escapeHtml(x.id)}">Remove sermon</button></div>`;
+  const item = sermons.find(x => x.id === sermonId);
+  if (!item) return;
+  const notes = item.notes || {};
+  $('#detail-content').innerHTML = `<div class="detail-shell">
+    <div class="detail-top">
+      <button class="back-button" data-detail-close type="button">Back to library</button>
+      <div class="detail-actions">
+        <button class="ghost-button" data-copy-markdown="${escapeHtml(item.id)}" type="button">Copy notes</button>
+        <button class="ghost-button" data-download-markdown="${escapeHtml(item.id)}" type="button">Markdown</button>
+        <button class="favorite ${item.favorite ? 'is-favorite' : ''}" data-favorite="${escapeHtml(item.id)}" type="button">${item.favorite ? 'Saved' : 'Save'}</button>
+      </div>
+    </div>
+    <section class="detail-hero">
+      <div>
+        <p class="eyebrow">${escapeHtml(item.series || 'Study page')}</p>
+        <h2>${escapeHtml(item.title)}</h2>
+        <p>${escapeHtml(item.speaker || 'Unknown speaker')} <span>|</span> ${dateLabel(item.createdAt)}</p>
+        <div class="detail-tags">${[item.passage, ...(item.topics || []), ...(notes.keywords || [])].filter(Boolean).slice(0, 10).map(tag => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
+      </div>
+      <img src="${escapeHtml(item.thumbnail)}" alt="" loading="lazy">
+    </section>
+    <div class="video-wrap"><iframe src="https://www.youtube-nocookie.com/embed/${escapeHtml(item.videoId)}" title="${escapeHtml(item.title)}" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>
+    <section class="detail-note">
+      <p class="eyebrow">Message summary</p>
+      <p>${escapeHtml(notes.summary || '')}</p>
+    </section>
+    <div class="detail-columns">
+      <section><h3>Key takeaways</h3><ol class="takeaways">${(notes.takeaways || []).map(text => `<li>${escapeHtml(text)}</li>`).join('') || '<li>No takeaways captured yet.</li>'}</ol></section>
+      <section><h3>Study outline</h3><div class="outline">${(notes.outline || []).map(point => `<article><strong>${escapeHtml(point.title)}</strong><p>${escapeHtml(point.point)}</p></article>`).join('') || '<p class="muted-text">No outline captured yet.</p>'}</div></section>
+    </div>
+    <div class="detail-columns">
+      <section><h3>Discussion questions</h3><ul class="question-list">${(notes.questions || []).map(text => `<li>${escapeHtml(text)}</li>`).join('') || '<li>What should I remember and practice?</li>'}</ul></section>
+      <section><h3>Memorable moments</h3><div class="highlights">${(notes.highlights || []).map(text => `<blockquote>${escapeHtml(text)}</blockquote>`).join('') || '<p class="muted-text">No highlights captured yet.</p>'}</div></section>
+    </div>
+    ${notes.prayer ? `<section class="prayer-panel"><h3>Prayer prompt</h3><p>${escapeHtml(notes.prayer)}</p></section>` : ''}
+    <section class="reflection-panel">
+      <h3>My reflections</h3>
+      <textarea id="reflection" maxlength="5000" rows="6" placeholder="What stood out, and how will you put it into practice?">${escapeHtml(item.reflection || '')}</textarea>
+      <div><button class="side-add" data-save-reflection="${escapeHtml(item.id)}" type="button">Save reflection</button><span id="reflection-status" role="status"></span></div>
+    </section>
+    <details class="transcript-panel">
+      <summary>Read full transcript</summary>
+      <p>${escapeHtml(item.transcript)}</p>
+    </details>
+    <div class="detail-bottom">
+      <small>Notes: ${notes.mode === 'ai' ? 'AI-assisted' : 'extractive'} | Transcript: ${escapeHtml(item.source)}. Verify against the original sermon.</small>
+      <button class="delete-button" data-delete="${escapeHtml(item.id)}" type="button">Remove sermon</button>
+    </div>
+  </div>`;
   if (!$('#detail-dialog').open) $('#detail-dialog').showModal();
 }
 
-document.addEventListener('click', async event => {
-  const open = event.target.closest('[data-open]');
-  const favorite = event.target.closest('[data-favorite]');
-  const remove = event.target.closest('[data-delete]');
-  const saveReflection = event.target.closest('[data-save-reflection]');
-  if (open) openDetail(open.dataset.open);
-  if (favorite) { const x = sermons.find(item => item.id === favorite.dataset.favorite); if (x) { try { const result = await api(`/api/sermons/${x.id}`, { method: 'PATCH', body: JSON.stringify({ favorite: !x.favorite }) }); Object.assign(x, result.sermon); render(); if ($('#detail-dialog').open) openDetail(x.id); } catch (error) { alert(error.message); } } }
-  if (remove && confirm('Remove this sermon from your library?')) { try { await api(`/api/sermons/${remove.dataset.delete}`, { method: 'DELETE' }); sermons = sermons.filter(x => x.id !== remove.dataset.delete); $('#detail-dialog').close(); render(); } catch (error) { alert(error.message); } }
-  if (saveReflection) { try { const result = await api(`/api/sermons/${saveReflection.dataset.saveReflection}`, { method: 'PATCH', body: JSON.stringify({ reflection: $('#reflection').value }) }); const x = sermons.find(item => item.id === result.sermon.id); if (x) Object.assign(x, result.sermon); $('#reflection-status').textContent = 'Saved'; } catch (error) { $('#reflection-status').textContent = error.message; } }
-  if (event.target.closest('[data-detail-close]')) $('#detail-dialog').close();
-});
-
-$('#export').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify({ version: 1, sermons }, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'sermonwise-library.json'; a.click(); URL.revokeObjectURL(url);
-});
-$('#import').addEventListener('change', async event => {
-  try {
-    const data = JSON.parse(await event.target.files[0].text());
-    if (!Array.isArray(data.sermons) || data.version !== 1) throw new Error('Invalid library file.');
-    const incoming = data.sermons.filter(x => x && typeof x.title === 'string' && /^[a-zA-Z0-9_-]{11}$/.test(x.videoId) && typeof x.transcript === 'string' && x.notes && typeof x.notes.summary === 'string').slice(0, 500);
-    for (const sermon of incoming) await api('/api/sermons', { method: 'POST', body: JSON.stringify(sermon) });
-    await refreshLibrary();
-  } catch (error) { alert(error.message || 'Could not import library.'); }
-  event.target.value = '';
-});
 function showAuth(mode = 'login') {
   authMode = mode;
   $('#auth-title').textContent = mode === 'login' ? 'Welcome back' : 'Create your account';
@@ -104,13 +262,142 @@ function showAuth(mode = 'login') {
   $('#auth-message').textContent = '';
   if (!$('#auth-dialog').open) $('#auth-dialog').showModal();
 }
+
 async function importOldLibrary() {
-  const old = load();
+  const old = loadOldLibrary();
   if (!old.length || !confirm(`Import ${old.length} sermon${old.length === 1 ? '' : 's'} saved in this browser into your account?`)) return;
   for (const sermon of old) await api('/api/sermons', { method: 'POST', body: JSON.stringify(sermon) });
   localStorage.removeItem(KEY);
   await refreshLibrary();
 }
+
+['#add-side', '#add-top', '#add-empty'].forEach(selector => $(selector).addEventListener('click', openAdd));
+document.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', () => el.closest('dialog').close()));
+document.querySelectorAll('dialog').forEach(el => el.addEventListener('click', event => { if (event.target === el && el.id !== 'auth-dialog') el.close(); }));
+['#search', '#speaker-filter', '#series-filter', '#topic-filter', '#source-filter', '#sort-select'].forEach(selector => $(selector).addEventListener(selector === '#search' ? 'input' : 'change', render));
+
+$('#clear-filters').addEventListener('click', () => {
+  ['#search', '#speaker-filter', '#series-filter', '#topic-filter', '#source-filter'].forEach(selector => { $(selector).value = ''; });
+  render();
+});
+
+$('#grid-view').addEventListener('click', () => { viewMode = 'grid'; localStorage.setItem('sermonwise.view', viewMode); render(); });
+$('#list-view').addEventListener('click', () => { viewMode = 'list'; localStorage.setItem('sermonwise.view', viewMode); render(); });
+$('#nav-library').addEventListener('click', () => { favoritesOnly = false; $('#nav-library').classList.add('active'); $('#nav-favorites').classList.remove('active'); render(); });
+$('#nav-favorites').addEventListener('click', () => { favoritesOnly = true; $('#nav-favorites').classList.add('active'); $('#nav-library').classList.remove('active'); render(); });
+
+$('#add-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  const button = $('#submit-button');
+  button.disabled = true;
+  button.textContent = 'Creating notes...';
+  $('#form-message').textContent = 'This can take a few minutes if audio transcription is needed.';
+  try {
+    const result = await api('/api/analyze', { method: 'POST', body: JSON.stringify({ url: data.url, transcript: data.transcript }) });
+    const draft = {
+      url: `https://www.youtube.com/watch?v=${result.videoId}`,
+      videoId: result.videoId,
+      title: result.title,
+      speaker: data.speaker.trim() || result.speaker,
+      series: data.series.trim(),
+      passage: data.passage.trim() || result.notes.passages?.[0] || '',
+      topics: data.topics.split(',').map(text => text.trim()).filter(Boolean),
+      transcript: result.transcript,
+      source: result.source,
+      notes: result.notes
+    };
+    const sermon = (await api('/api/sermons', { method: 'POST', body: JSON.stringify(draft) })).sermon;
+    sermons.unshift(sermon);
+    render();
+    form.reset();
+    $('#add-dialog').close();
+    openDetail(sermon.id);
+  } catch (error) {
+    $('#form-message').textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Create study notes';
+  }
+});
+
+document.addEventListener('click', async event => {
+  const open = event.target.closest('[data-open]');
+  const favorite = event.target.closest('[data-favorite]');
+  const remove = event.target.closest('[data-delete]');
+  const saveReflection = event.target.closest('[data-save-reflection]');
+  const copy = event.target.closest('[data-copy-markdown]');
+  const download = event.target.closest('[data-download-markdown]');
+
+  if (open) openDetail(open.dataset.open);
+  if (favorite) {
+    const item = sermons.find(x => x.id === favorite.dataset.favorite);
+    if (item) {
+      try {
+        const result = await api(`/api/sermons/${item.id}`, { method: 'PATCH', body: JSON.stringify({ favorite: !item.favorite }) });
+        Object.assign(item, result.sermon);
+        render();
+        if ($('#detail-dialog').open) openDetail(item.id);
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+  }
+  if (remove && confirm('Remove this sermon from your library?')) {
+    try {
+      await api(`/api/sermons/${remove.dataset.delete}`, { method: 'DELETE' });
+      sermons = sermons.filter(item => item.id !== remove.dataset.delete);
+      $('#detail-dialog').close();
+      render();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+  if (saveReflection) {
+    try {
+      const result = await api(`/api/sermons/${saveReflection.dataset.saveReflection}`, { method: 'PATCH', body: JSON.stringify({ reflection: $('#reflection').value }) });
+      const item = sermons.find(x => x.id === result.sermon.id);
+      if (item) Object.assign(item, result.sermon);
+      $('#reflection-status').textContent = 'Saved';
+    } catch (error) {
+      $('#reflection-status').textContent = error.message;
+    }
+  }
+  if (copy) {
+    const item = sermons.find(x => x.id === copy.dataset.copyMarkdown);
+    if (item) {
+      await copyText(markdownFor(item));
+      copy.textContent = 'Copied';
+      setTimeout(() => { copy.textContent = 'Copy notes'; }, 1200);
+    }
+  }
+  if (download) {
+    const item = sermons.find(x => x.id === download.dataset.downloadMarkdown);
+    if (item) downloadText(`${safeFileName(item.title)}.md`, markdownFor(item));
+  }
+  if (event.target.closest('[data-detail-close]')) $('#detail-dialog').close();
+});
+
+$('#export').addEventListener('click', () => {
+  downloadText('sermonwise-library.json', JSON.stringify({ version: 1, sermons }, null, 2), 'application/json');
+});
+
+$('#import').addEventListener('change', async event => {
+  try {
+    const file = event.target.files[0];
+    if (!file) return;
+    const data = JSON.parse(await file.text());
+    if (!Array.isArray(data.sermons) || data.version !== 1) throw new Error('Invalid library file.');
+    const incoming = data.sermons.filter(item => item && typeof item.title === 'string' && /^[a-zA-Z0-9_-]{11}$/.test(item.videoId) && typeof item.transcript === 'string' && item.notes && typeof item.notes.summary === 'string').slice(0, 500);
+    for (const sermon of incoming) await api('/api/sermons', { method: 'POST', body: JSON.stringify(sermon) });
+    await refreshLibrary();
+  } catch (error) {
+    alert(error.message || 'Could not import library.');
+  }
+  event.target.value = '';
+});
+
 $('#auth-switch').addEventListener('click', () => showAuth(authMode === 'login' ? 'register' : 'login'));
 $('#auth-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -126,19 +413,48 @@ $('#auth-form').addEventListener('submit', async event => {
     form.reset();
     await refreshLibrary();
     await importOldLibrary();
-  } catch (error) { $('#auth-message').textContent = error.message; }
-  finally { button.disabled = false; }
+  } catch (error) {
+    $('#auth-message').textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
 });
+
 $('#logout').addEventListener('click', async () => {
   await api('/api/logout', { method: 'POST' });
-  currentUser = null; sermons = []; $('#account-email').textContent = 'Sign in to sync'; $('#logout').hidden = true; render(); showAuth();
+  currentUser = null;
+  sermons = [];
+  $('#account-email').textContent = 'Sign in to sync';
+  $('#logout').hidden = true;
+  render();
+  showAuth();
 });
+
 async function init() {
   try {
+    const status = await api('/api/status');
+    $('#ai-status').textContent = status.aiConfigured ? 'AI ready' : 'Extractive mode';
+    $('#storage-status').textContent = `${status.storage === 'postgres' ? 'Postgres' : 'Local'} storage active`;
+  } catch {
+    $('#ai-status').textContent = 'Status unavailable';
+    $('#storage-status').textContent = 'Check server';
+  }
+
+  try {
     const result = await api('/api/me');
-    if (result.user) { currentUser = result.user; $('#account-email').textContent = currentUser.email; $('#logout').hidden = false; await refreshLibrary(); await importOldLibrary(); }
-    else showAuth();
-  } catch { showAuth(); }
+    if (result.user) {
+      currentUser = result.user;
+      $('#account-email').textContent = currentUser.email;
+      $('#logout').hidden = false;
+      await refreshLibrary();
+      await importOldLibrary();
+    } else {
+      showAuth();
+    }
+  } catch {
+    showAuth();
+  }
 }
+
 render();
 init();

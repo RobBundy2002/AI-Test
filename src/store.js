@@ -19,6 +19,7 @@ export async function createPgStore(connectionString = process.env.DATABASE_URL)
   )`);
   await pool.query('CREATE INDEX IF NOT EXISTS sermons_user_created_idx ON sermons(user_id, created_at DESC)');
   return {
+    kind: 'postgres',
     async createUser(id, email, passwordHash) {
       try { await pool.query('INSERT INTO users(id,email,password_hash) VALUES($1,$2,$3)', [id, email, passwordHash]); return { id, email }; }
       catch (error) { if (error.code === '23505') return null; throw error; }

@@ -10,8 +10,9 @@ async function withApp(options, fn) {
 }
 
 test('health and homepage are served', async () => {
-  await withApp({}, async base => {
+  await withApp({ apiKey: 'secret-test-key' }, async base => {
     assert.deepEqual(await (await fetch(`${base}/health`)).json(), { ok: true });
+    assert.deepEqual(await (await fetch(`${base}/api/status`)).json(), { aiConfigured: true, storage: 'custom' });
     assert.match(await (await fetch(base)).text(), /SermonWise/);
   });
 });

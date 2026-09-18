@@ -14,5 +14,5 @@ services:
         sync: false
 databases:
   - name: sermonwise-db
-    plan: 0.1c-256mb
+    plan: free
     databaseName: sermonwise
